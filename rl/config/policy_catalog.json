@@ -1,0 +1,16 @@
+{
+  "_comment": "UI 정책 목록 설명. 키 = rl/runs 아래 실험 폴더 이름. _exclude: 현재 환경과 관측 구조가 맞지 않거나 실패해서 숨기는 실험.",
+  "_exclude": [
+    "serp_v1",
+    "serp_v5_lift",
+    "serp_v6_lift_kp3_aborted",
+    "serp_v8_climb_aborted"
+  ],
+  "serp_v2": "평지 serpentine 기본: 시선 고정, 머리 명령 없음 (j2가 파형 포함)",
+  "serp_v3_head": "v2 + 머리 yaw 명령 ±40° (j2가 파형 포함)",
+  "serp_v4_neck": "평지 최종: j2를 목 관절로 분리, 머리 흔들림 감소, 머리 yaw 명령",
+  "serp_v6_lift": "실패(참고용): 머리 들기 + 목 자세 사전, kp=10 — 제자리에서 버팀",
+  "serp_v7_terrain": "v4 + Teraffe 지형 커리큘럼 (외력 이방성 마찰, 블라인드)",
+  "serp_v8_climb": "v7 + 옆 마찰 1.5, 몸통 pitch ±1.2 rad, 0.5초 고유감각 이력, 지형 critic, 뒤집힘·밀기·노이즈 랜덤화",
+  "serp_v9_amp": "v8 + yaw 파형 관절별 진폭 액션(7개), 접촉 기반 지지 보상, 링크 롤 각속도 감점, 1.6 cm 격자(거의 수직 라이저)"
+}

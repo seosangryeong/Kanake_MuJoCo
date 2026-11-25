@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+install/
+log/
+rl/.venv/
+rl/runs/
+
+# Training logs and MuJoCo crash logs
+rl/*.log
+MUJOCO_LOG.TXT
