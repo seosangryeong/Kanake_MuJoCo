@@ -46,9 +46,14 @@ rl/.venv/bin/python rl/train.py --init-from rl/runs/serp_v7_terrain/model_5999.p
   --climb --climb-pitch 1.2 --friction-lateral 1.5 --randomize \
   --flip-probability 0.25 --push-interval 8 --obs-noise 0.01 --iterations 4000 --log-dir rl/runs/serp_v8_climb
 
-# v9: v8 + 파형 관절별 진폭 액션, 접촉 기반 지지 보상
+# v9: v8 + 파형 관절별 진폭 액션, 접촉 기반 지지 보상 (처음부터 학습하면 움직이지 않는 쪽으로 수렴해 warm start 사용)
 rl/.venv/bin/python rl/train.py --init-from rl/runs/serp_v8_climb/model_3999.pt \
   --amplitude-per-joint --support-reward --iterations 4000 --log-dir rl/runs/serp_v9_amp
+
+# 계단 전용: +x 0.08 m/s 고정, 단 높이 4→30 cm 커리큘럼 (꼭대기 도달 시 승급)
+rl/.venv/bin/python rl/train.py --init-from rl/runs/serp_v9_amp/model_3999.pt --task stairs \
+  --speed-scale 0.08 --episode-steps 1200 --flip-probability 0.1 --push-interval 0 \
+  --action-bound-penalty 0.05 --entropy-coef 0.002 --iterations 3000 --log-dir rl/runs/stairs_v2
 ```
 
 - `--resume`은 같은 관측·액션 구조에서 정책, 옵티마이저, 정규화를 이어받습니다.
@@ -90,6 +95,10 @@ pitch 관절:              θ   = r
 - **critic (climb):** 정책 관측 + 몸 주변 지형 높이 55점, 마찰, 지형 단계, 몸 바로 섬 정도. 학습에만 쓰는 특권 정보입니다.
 - **보상:** COM 속도 추종, 머리 yaw 추종(좁은·넓은 커널), 머리 3축 각속도, 머리 흔들림, 몸 방향, 머리 수평(climb은 지면 기울기 기준), 측면 미끄러짐, pitch·보정 크기, 액션 변화, 전력. 랜덤화를 켜면 바로 섬, climb은 뜬 링크(또는 접촉 없는 링크) 감점이 더해집니다.
 
+## 계단 전용 과제 (`--task stairs`)
+
++x 방향으로 오르는 계단(단 4–6개, 디딤판 30–45 cm, 1.6 cm 격자라 라이저가 거의 수직)만 쓰고, 명령은 +x 전진으로 고정합니다. 단 높이는 4–30 cm(2 cm 간격 14단계)이고, 환경마다 꼭대기에 오르면 승급, 한 단도 못 오르면 강등합니다. 보상은 전진 속도, 새 단마다 +10, 머리 정면 응시, 바로 섬, 진행 방향, 지지 없는 링크(접촉이 없고 지면에서 4 mm 넘게 뜬 링크) 벌점, 원래 액션이 ±1 밖으로 나간 만큼의 포화 벌점입니다. heightfield 높이 범위는 30 cm 단 여러 개를 담도록 2 m입니다.
+
 ## 지형과 도메인 랜덤화
 
 - **지형 (`--terrain random`):** Teraffe `procedural_terrain.py`와 같은 7종 heightfield(8 m × 8 m, 1.6 cm 격자). 최종 난이도도 Teraffe와 같습니다(높이 12–30 cm, 계단 6–12 cm, 턱 10–20 cm, 파장 1.2–2.8 m). 5단계 높이 배율 0.15–1.0, 평지 비율 80–5%. 환경마다 에피소드 속도 오차로 승급·강등합니다 ([procedural.py](kanake_mujoco/procedural.py)).
@@ -106,7 +115,9 @@ pitch 관절:              θ   = r
 | serp_v5/v6_lift | 실패: 머리 5–10 cm 들기. 목 자세 사전 + kp 10에서도 제자리 버팀 |
 | serp_v7_terrain | v4 + 지형 커리큘럼 (외력 이방성 마찰) |
 | serp_v8_climb | v7 + 옆 마찰 1.5, 몸통 pitch ±1.2 rad, 이력, 지형 critic, 뒤집힘·밀기 |
-| serp_v9_amp | v8 + 관절별 진폭, 접촉 기반 지지 보상 |
+| serp_v9_amp | v8 + 관절별 진폭, 접촉 기반 지지 보상. 진폭은 0 또는 상한(60°)만 쓰고 회전은 조향으로 함 (tanh 포화) |
+| stairs_v1 | 계단 전용 1→12 cm. 3/6/9 cm 꼭대기까지, 12 cm 3–4단 (1350회 시점) |
+| stairs_v2 | 계단 전용 4→30 cm, stairs_v1에서 이어서 (2900회까지 저장) |
 
 UI 정책 목록의 설명은 [rl/config/policy_catalog.json](rl/config/policy_catalog.json)에 있습니다.
 

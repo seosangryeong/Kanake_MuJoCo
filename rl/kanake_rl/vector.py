@@ -17,7 +17,7 @@ from kanake_mujoco.model import build_model
 
 TRACKING_KEYS = ("velocity_error_mps", "speed_mps", "command_speed_mps", "head_yaw_error_deg",
                  "head_rate_dps", "head_spin_dps", "head_sway_mps", "head_tilt_deg", "head_height_error_cm", "head_height_cm", "head_pitch_error_deg", "head_roll_deg", "body_heading_error_deg", "slip_ratio", "frequency_hz",
-                 "amplitude_deg", "goal_distance_m", "terrain_level", "head_slope_error_deg", "air_fraction", "unsupported_fraction")
+                 "amplitude_deg", "goal_distance_m", "terrain_level", "head_slope_error_deg", "air_fraction", "unsupported_fraction", "steps_climbed", "top_reached", "stair_height_cm")
 
 
 class _Worlds:

@@ -65,6 +65,8 @@ def main():
                         help="One amplitude action per wave joint (j4–j16) instead of a shared amplitude")
     parser.add_argument("--support-reward", action=argparse.BooleanOptionalAction, default=None,
                         help="Climbing: penalize links touching nothing and link roll rate")
+    parser.add_argument("--action-bound-penalty", type=float, help="Penalty weight on raw actions beyond ±1")
+    parser.add_argument("--entropy-coef", type=float, help="PPO entropy bonus")
     parser.add_argument("--flip-probability", type=float, help="Share of episodes that start rolled over")
     parser.add_argument("--push-interval", type=float, help="Mean seconds between random pushes (0 off)")
     parser.add_argument("--obs-noise", type=float, help="Gaussian noise added to policy observations")
@@ -84,14 +86,16 @@ def main():
             init_env = metadata["environment"]
             cfg = EnvConfig(**metadata["environment"])
             ppo = metadata["ppo"]
-            if args.task is not None and args.task != cfg.task:
+            if args.resume and args.task is not None and args.task != cfg.task:
                 raise ValueError("Resume requires the checkpoint's task")
+        if args.entropy_coef is not None:
+            ppo["algorithm"]["entropy_coef"] = args.entropy_coef
         if args.rollout is not None:
             ppo["num_steps_per_env"] = args.rollout
         fields = ("task", "terrain", "park_zone", "episode_steps", "speed_scale", "head_yaw_range",
                   "head_lift", "head_pitch_range", "head_height_min", "head_height_max", "lift_curriculum_steps",
                   "randomize", "seed", "collision", "friction_axial", "friction_lateral", "kp", "kv", "lateral", "climb", "climb_pitch", "climb_yaw", "upright_weight",
-                  "amplitude_per_joint", "support_reward",
+                  "amplitude_per_joint", "support_reward", "action_bound_penalty",
                   "flip_probability", "push_interval", "obs_noise")
         overrides = {key: getattr(args, key) for key in fields if getattr(args, key) is not None}
         if args.terrain is not None and args.terrain != cfg.terrain:

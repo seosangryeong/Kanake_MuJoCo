@@ -11,3 +11,6 @@ rl/runs/
 # Training logs and MuJoCo crash logs
 rl/*.log
 MUJOCO_LOG.TXT
+
+# Claude Code local state
+.claude/

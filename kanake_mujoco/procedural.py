@@ -18,7 +18,7 @@ KINDS = ("flat", "wave", "stairs", "ledge", "slope", "rough", "bumps")
 WEIGHTS = (0.05, 0.25, 0.25, 0.20, 0.075, 0.10, 0.075)  # Teraffe's final mix.
 HALF_EXTENT = 4.0  # m; 8 m × 8 m holds 2.8 m wavelengths and a 20 s episode.
 GRID = 513  # 1.6 cm cells: a 12 cm riser rises at ~83°, close to a real wall to lean on.
-HEIGHT_SCALE = 0.50  # m; heightfield elevation range, as in Teraffe.
+HEIGHT_SCALE = 2.0  # m; heightfield elevation range, enough for six 30 cm stair steps.
 AMPLITUDE = (0.12, 0.30)
 WAVELENGTH = (1.2, 2.8)
 STEP_HEIGHT = (0.06, 0.12)
@@ -76,3 +76,19 @@ def bank(seed):
                 names.append(kind)
         levels.append((np.stack(grids), tuple(names)))
     return tuple(levels)
+
+
+# --- Stair-climbing task -------------------------------------------------------------------------
+# Riser heights per curriculum level; a world is promoted after reaching the top landing.
+# 4 cm (about the robot's 3.8 cm thickness) up to 30 cm, past 15–20 cm building stairs.
+STAIR_HEIGHTS = tuple(round(0.04 + 0.02 * i, 2) for i in range(14))
+
+
+def stairs(rng, height):
+    """Steps rising along +x from x = 0 (4–6 steps, 30–45 cm treads), flat start and top landing."""
+    tread = float(rng.uniform(0.30, 0.45))
+    count = int(rng.integers(4, 7))
+    axis = np.linspace(-HALF_EXTENT, HALF_EXTENT, GRID)
+    x = np.meshgrid(axis, axis)[0]
+    grid = height * np.clip(np.floor(x / tread) + 1, 0, count)
+    return grid.astype(np.float32), tread, count

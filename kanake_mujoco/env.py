@@ -228,6 +228,10 @@ class KanakeEnv:
                 self.goal = self.root_position[:2] + self.rng.uniform(-2.0, 2.0, size=2)
                 self.command_time_left = self.rng.uniform(15.0, 20.0)
             self.command[2] = 0.0
+        elif self.cfg.task == "stairs":
+            # Straight up the stairs (+x) at the commanded speed, gaze forward.
+            self.command[:] = (self.cfg.speed_scale, 0.0, 0.0, 0.0, 0.0)
+            self.command_time_left = math.inf
         elif fixed is not None:
             self.command[:3] = fixed[:3]
             self.command[3:] = fixed[3:] if len(fixed) == 5 else (0.0, self._height_range()[1])
@@ -295,7 +299,11 @@ class KanakeEnv:
             zone = self.cfg.park_zone or int(self.rng.integers(1, len(PARK_ZONES) + 1))
             _, _, x, y = PARK_ZONES[zone - 1]
             xy, yaw = (x - 4.9, y), self.rng.uniform(-0.3, 0.3)
-        if self.cfg.terrain == "random":
+        if self.cfg.task == "stairs":
+            # Body centre 0.55 m before the first riser, facing up the stairs.
+            xy, yaw = (-0.55, float(self.rng.uniform(-1.5, 1.5))), self.rng.uniform(-0.3, 0.3)
+            self._next_stairs()
+        elif self.cfg.terrain == "random":
             xy = tuple(self.rng.uniform(-1.0, 1.0, 2))
             self._next_terrain()
         if neutral:
@@ -341,6 +349,31 @@ class KanakeEnv:
         self._sample_command()
         self.info = {}
         return self.observe()
+
+    def _next_stairs(self):
+        """Promote after reaching the top, demote after not a single step, then build new stairs."""
+        levels = len(procedural.STAIR_HEIGHTS)
+        if self.fixed_level is not None:
+            self.terrain_level = self.fixed_level
+        elif getattr(self, "stair_count", 0):
+            if self.best_steps >= self.stair_count:
+                self.terrain_level = min(self.terrain_level + 1, levels - 1)
+            elif self.best_steps == 0 and self.elapsed_steps >= 400:
+                self.terrain_level = max(self.terrain_level - 1, 0)
+        self.stair_height = procedural.STAIR_HEIGHTS[self.terrain_level]
+        if self.terrain_override is not None:
+            grid, self.terrain_kind = self.terrain_override
+            self.stair_tread, self.stair_count = 0.35, 5
+        else:
+            grid, self.stair_tread, self.stair_count = procedural.stairs(self.rng, self.stair_height)
+            self.terrain_kind = "stairs"
+        self.model.hfield_data[:] = grid.ravel() / procedural.HEIGHT_SCALE
+        self.grid = grid
+        self.best_steps = 0
+
+    def steps_under_body(self):
+        """Which step the body centre is on (0 = start floor)."""
+        return int(round(self.ground_height(self.com[None, :2])[0] / self.stair_height))
 
     def _next_terrain(self):
         """Promote or demote this world on its last episode, then load a terrain of that level."""
@@ -417,12 +450,18 @@ class KanakeEnv:
         return np.concatenate(((action[2:2 + n].mean(), action[0], action[1]), action[2 + n:]))
 
     def unsupported_fraction(self):
-        """Share of links touching nothing; contact with ground, a riser or an edge all count."""
+        """Share of links touching nothing: no contact (ground, riser or edge) and over 4 mm above the ground.
+
+        A link resting with zero penetration produces no MuJoCo contact, so the clearance test
+        catches links lying on the ground; contacts catch links leaning on a riser or an edge.
+        """
         n = self.data.ncon
         supported = np.zeros(self.model.nbody, dtype=bool)
         supported[self.model.geom_bodyid[self.data.contact.geom1[:n]]] = True
         supported[self.model.geom_bodyid[self.data.contact.geom2[:n]]] = True
-        return float(1.0 - supported[self.body_ids].mean())
+        centres = self.data.xipos[self.body_ids]
+        near = centres[:, 2] - self.ground_height(centres[:, :2]) - 0.019 < 0.004
+        return float(1.0 - (supported[self.body_ids] | near).mean())
 
     def roll_rate(self):
         """Mean squared spin of the links about their own long axes (rad²/s²)."""
@@ -592,6 +631,8 @@ class KanakeEnv:
         return float(np.mean(lateral ** 2)), float(ratio)
 
     def _reward(self, action):
+        if self.cfg.task == "stairs":
+            return self._reward_stairs(action)
         target = self.command[:2]
         velocity_error = float(np.linalg.norm(self.filtered_velocity - target))
         head_error = wrap_angle(self.head_yaw - self.head_target)
@@ -680,5 +721,50 @@ class KanakeEnv:
                              head_roll_deg=abs(math.degrees(roll)))
         if self.cfg.task == "navigation":
             self.info["goal_distance_m"] = float(np.linalg.norm(self.goal - self.com[:2]))
+        self.info.update({f"reward_{k}": v for k, v in terms.items()})
+        return float(sum(terms.values()) * CONTROL_DT)
+
+    def _bound_penalty(self, action):
+        return float(np.sum(np.maximum(np.abs(action) - 1.0, 0.0) ** 2))
+
+    def _reward_stairs(self, action):
+        """Progress up the stairs: forward speed, a bonus per new step, posture and support."""
+        target = self.cfg.speed_scale
+        forward = float(self.filtered_velocity[0])
+        steps = self.steps_under_body()
+        gained = max(steps - self.best_steps, 0)
+        self.best_steps = max(self.best_steps, steps)
+        head_error = wrap_angle(self.head_yaw - self.head_target)
+        body_error = wrap_angle(self.body_heading - self.travel_yaw)
+        slip, slip_ratio = self._slip()
+        unsupported = self.unsupported_fraction()
+        power = np.abs(self.data.qfrc_actuator[self.joint_dofs] * self.data.qvel[self.joint_dofs]).sum()
+        terms = {
+            "progress": 4.0 * float(np.clip(forward, -0.05, 1.5 * target)) / target,
+            "step": 10.0 * gained / CONTROL_DT,  # +10 per newly reached step.
+            "head_yaw": 0.5 * math.exp(-(head_error / 0.3) ** 2),
+            "heading": 0.5 * math.exp(-(body_error / 0.5) ** 2),
+            "upright": 1.0 * self.upright(),
+            "supported": -0.2 * unsupported,
+            "slip": -10.0 * slip,
+            "bound": -self.cfg.action_bound_penalty * self._bound_penalty(action),
+            "action_rate": -0.01 * float(np.sum(np.square(action - self.last_action))),
+            "power": -0.002 * float(power),
+        }
+        self.info = {
+            "velocity_error_mps": abs(forward - target),
+            "speed_mps": forward,
+            "command_speed_mps": target,
+            "head_yaw_error_deg": abs(math.degrees(head_error)),
+            "head_rate_dps": abs(math.degrees(self.head_rate)),
+            "body_heading_error_deg": abs(math.degrees(body_error)),
+            "slip_ratio": slip_ratio,
+            "frequency_hz": float(self.gait[1]),
+            "amplitude_deg": math.degrees(self.gait[0]),
+            "unsupported_fraction": unsupported,
+            "steps_climbed": float(self.best_steps),
+            "top_reached": float(self.best_steps >= self.stair_count),
+            "stair_height_cm": 100 * self.stair_height,
+        }
         self.info.update({f"reward_{k}": v for k, v in terms.items()})
         return float(sum(terms.values()) * CONTROL_DT)

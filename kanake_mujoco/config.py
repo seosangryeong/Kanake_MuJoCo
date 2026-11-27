@@ -11,7 +11,7 @@ BODY_NAMES = ("tail", *(f"Link{i}" for i in range(1, 16)), "head")
 YAW_INDEX = tuple(range(1, 16, 2))
 PITCH_INDEX = tuple(range(0, 16, 2))
 TERRAINS = ("flat", "ramps", "park", "random")
-TASKS = ("locomotion", "navigation")
+TASKS = ("locomotion", "navigation", "stairs")
 CONTROL_DT = 0.025
 PHYSICS_SUBSTEPS = 10
 # Serpenoid amplitude, frequency and steering offset, then a residual for every joint.
@@ -58,6 +58,8 @@ class EnvConfig:
     amplitude_per_joint: bool = False
     # Contact-based support reward (links touching nothing are penalized) and a link roll-rate penalty.
     support_reward: bool = False
+    # Penalty weight on raw actions beyond ±1 (keeps tanh/clip mappings out of saturation).
+    action_bound_penalty: float = 0.0
     # Robustness randomization (Teraffe-style): start rolled over, random pushes, observation noise.
     flip_probability: float = 0.0
     push_interval: float = 0.0  # Mean seconds between pushes; 0 disables.
@@ -70,6 +72,8 @@ class EnvConfig:
             raise ValueError("Park zones 1–15 are available on the park terrain")
         if self.episode_steps < 1 or not isfinite(self.speed_scale) or self.speed_scale <= 0 or self.seed < 0:
             raise ValueError("Episode length and speed scale must be positive and the seed must be nonnegative")
+        if self.task == "stairs" and (self.terrain != "random" or not self.climb):
+            raise ValueError("The stairs task needs --terrain random --lateral force --climb")
         if self.terrain == "random" and self.lateral != "force":
             raise ValueError("Random terrain needs --lateral force")
         if not 0 <= self.head_yaw_range <= 1.5:
